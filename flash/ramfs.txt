@@ -1,0 +1,36 @@
+
+The ramfs.mk file implements optional logic to:
+
+- Extract a cpio.gz archive (typically an initramfs archive)
+- Modify or add to the content on the fly (typically: add kernel modules)
+- Recreate new .cpio.gz and .cpio.lzma archives with the modified content.
+
+All this in a single Make invocation.
+
+
+HOWTO use
+---------
+
+Let's take the example of adding fresh kernel module drivers.
+
+
+Do once
+-------
+
+First, open ramfs.mk. Scroll down to ${RAMFS_NEW}: ${RAMFS_WORK_DIR},
+then comment out the image modifications you don't need/want.
+
+cd my_linux_kernel/
+ln -s  /location/to/base/initramfs/image-spi-quark.cpio.gz  initramfs_orig.cpio.gz
+  # ( "initramfs_orig.cpio.gz" is the naming convention )
+export INSTALL_MOD_PATH=~/some/where/
+
+
+Do repeatedly
+-------------
+
+time make -j5 bzImage modules  &&  make modules_install
+rm -rf initramfs.dir    # ... omit this if you really understand what you are doing
+
+../spi-flash-tools/Makefile ramfs
+

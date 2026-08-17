@@ -1,0 +1,22 @@
+diff --git a/BaseTools/Source/C/GenFv/GenFvInternalLib.c b/BaseTools/Source/C/GenFv/GenFvInternalLib.c
+index 3f621d190..09ef48324 100644
+--- a/BaseTools/Source/C/GenFv/GenFvInternalLib.c
++++ b/BaseTools/Source/C/GenFv/GenFvInternalLib.c
+@@ -1658,7 +1658,16 @@ if (MachineType == IMAGE_FILE_MACHINE_I386 || MachineType == IMAGE_FILE_MACHINE_
+     //
+     Ia32ResetAddressPtr  = (UINT32 *) ((UINTN) FvImage->Eof - IA32_SEC_CORE_ENTRY_OFFSET);
+ 
+-    Ia32SecEntryOffset   = (INT32) (SecCorePhysicalAddress - (FV_IMAGES_TOP_ADDRESS - IA32_SEC_CORE_ENTRY_OFFSET + 2));
++    //
++    // The Quark stage-1 FV is copied to and executed from RAM rather than
++    // mapped at the top of the 4 GB address space.  Use the actual FV top as
++    // the reset-vector reference; this is identical to FV_IMAGES_TOP_ADDRESS
++    // for conventional top-mapped boot firmware.
++    //
++    Ia32SecEntryOffset   = (INT32) (
++                              SecCorePhysicalAddress -
++                              (FvInfo->BaseAddress + FvInfo->Size - IA32_SEC_CORE_ENTRY_OFFSET + 2)
++                              );
+     if (Ia32SecEntryOffset <= -65536) {
+       Error (NULL, 0, 3000, "Invalid", "The SEC EXE file size is too large, it must be less than 64K.");
+       return STATUS_ERROR;

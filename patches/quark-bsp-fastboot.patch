@@ -1,0 +1,389 @@
+diff --git a/IA32FamilyCpuBasePkg/PiSmmCommunication/PiSmmCommunicationSmm.c b/IA32FamilyCpuBasePkg/PiSmmCommunication/PiSmmCommunicationSmm.c
+index e56bbf9..02afa8a 100644
+--- a/IA32FamilyCpuBasePkg/PiSmmCommunication/PiSmmCommunicationSmm.c
++++ b/IA32FamilyCpuBasePkg/PiSmmCommunication/PiSmmCommunicationSmm.c
+@@ -80,8 +80,8 @@ EFI_SMM_COMMUNICATION_ACPI_TABLE  mSmmCommunicationAcpiTable = {
+   0x0,                                                   // SwSmiNumber
+   0x0                                                    // BufferPtrAddress
+ };
+-EFI_SMRAM_DESCRIPTOR              *mSmramRanges;
+-UINTN                             mSmramRangeCount;
++STATIC EFI_SMRAM_DESCRIPTOR       *mSmramRanges;
++STATIC UINTN                      mSmramRangeCount;
+ 
+ /**
+   This function check if the address is in SMRAM.
+diff --git a/QuarkPlatformPkg/Acpi/AcpiTables/Dsdt/Platform.asl b/QuarkPlatformPkg/Acpi/AcpiTables/Dsdt/Platform.asl
+index 913710e..5f7dac0 100644
+--- a/QuarkPlatformPkg/Acpi/AcpiTables/Dsdt/Platform.asl
++++ b/QuarkPlatformPkg/Acpi/AcpiTables/Dsdt/Platform.asl
+@@ -81,7 +81,7 @@ DefinitionBlock (
+   "DSDT",
+   1,
+   "INTEL ",
+-  "QuarkNcSocId",
++  "QuarkNC",
+   3)
+ {
+     //
+diff --git a/QuarkPlatformPkg/Library/PlatformBootManagerLib/BdsPlatform.c b/QuarkPlatformPkg/Library/PlatformBootManagerLib/BdsPlatform.c
+index 038e5fd..765c838 100755
+--- a/QuarkPlatformPkg/Library/PlatformBootManagerLib/BdsPlatform.c
++++ b/QuarkPlatformPkg/Library/PlatformBootManagerLib/BdsPlatform.c
+@@ -839,18 +839,20 @@ BootOptionPriority (
+   )
+ {
+   //
+-  // Make sure Shell is in the last
++  // The SPI payload owns removable-media discovery.  Boot it first so BDS
++  // does not probe a missing \\EFI\\BOOT\\BOOTIA32.EFI and report a harmless
++  // EFI_SW_DXE_BS_EC_BOOT_OPTION_LOAD_ERROR before entering GRUB.
+   //
++  if (StrCmp (BootOption->Description, L"UEFI Payload") == 0) {
++    return 0;
++  }
+   if (StrCmp (BootOption->Description, L"USB Device") == 0) {
+     return 10;
+   }
+-  if (StrCmp (BootOption->Description, L"UEFI Payload") == 0) {
+-    return 90;
+-  }
+   if (StrCmp (BootOption->Description, L"UEFI Internal Shell") == 0) {
+     return 100;
+   }
+-  return 0;
++  return 50;
+ }
+ 
+ BOOLEAN
+diff --git a/QuarkPlatformPkg/Library/PlatformHelperLib/PlatformHelperDxe.c b/QuarkPlatformPkg/Library/PlatformHelperLib/PlatformHelperDxe.c
+index 2ac7765..8dd9e86 100644
+--- a/QuarkPlatformPkg/Library/PlatformHelperLib/PlatformHelperDxe.c
++++ b/QuarkPlatformPkg/Library/PlatformHelperLib/PlatformHelperDxe.c
+@@ -294,7 +294,7 @@ PlatformFlashLockConfig (
+   //
+ 
+   SpiProtocol = LocateSpiProtocol (NULL);  // This routine will not be called in SMM.
+-  ASSERT_EFI_ERROR (SpiProtocol != NULL);
++  ASSERT (SpiProtocol != NULL);
+   if (SpiProtocol != NULL) {
+     Status = SpiProtocol->Lock (SpiProtocol);
+ 
+diff --git a/QuarkPlatformPkg/Override/MdePkg/Include/Library/DebugLib.h b/QuarkPlatformPkg/Override/MdePkg/Include/Library/DebugLib.h
+index c18b86c..3a5b9ef 100755
+--- a/QuarkPlatformPkg/Override/MdePkg/Include/Library/DebugLib.h
++++ b/QuarkPlatformPkg/Override/MdePkg/Include/Library/DebugLib.h
+@@ -351,6 +351,29 @@ CpuDeadLoop (
+   #define ASSERT_EFI_ERROR(StatusParameter)
+ #endif
+ 
++/**
++  Compatibility assertion used by current BaseTools-generated constructor code.
++
++  UDK2014 predates ASSERT_RETURN_ERROR(), but RETURN_STATUS and RETURN_ERROR()
++  are already defined by its Base.h.  Keep the implementation consistent with
++  ASSERT_EFI_ERROR() so the old platform override remains usable with a modern
++  Python 3 BaseTools build.
++**/
++#if !defined(MDEPKG_NDEBUG)
++  #define ASSERT_RETURN_ERROR(StatusParameter)                              \
++    do {                                                                     \
++      if (DebugAssertEnabled ()) {                                           \
++        if (RETURN_ERROR (StatusParameter)) {                                \
++          DEBUG ((EFI_D_ERROR, "\nASSERT_RETURN_ERROR (Status = %r)\n",     \
++            StatusParameter));                                               \
++          _ASSERT (!RETURN_ERROR (StatusParameter));                         \
++        }                                                                    \
++      }                                                                      \
++    } while (FALSE)
++#else
++  #define ASSERT_RETURN_ERROR(StatusParameter)
++#endif
++
+ /**  
+   Macro that calls DebugAssert() if a protocol is already installed in the 
+   handle database.
+diff --git a/QuarkPlatformPkg/Platform/Dxe/SmbiosMiscDxe/MiscNumberOfInstallableLanguagesFunction.c b/QuarkPlatformPkg/Platform/Dxe/SmbiosMiscDxe/MiscNumberOfInstallableLanguagesFunction.c
+index 1b3efd8..28967b9 100644
+--- a/QuarkPlatformPkg/Platform/Dxe/SmbiosMiscDxe/MiscNumberOfInstallableLanguagesFunction.c
++++ b/QuarkPlatformPkg/Platform/Dxe/SmbiosMiscDxe/MiscNumberOfInstallableLanguagesFunction.c
+@@ -92,7 +92,7 @@ CurrentLanguageMatch (
+     //
+     LangMatch = TRUE;
+     CompareLength = AsciiStrLen (BestLanguage);
+-    for (MatchLang = Languages, (*Offset) = 0; MatchLang != '\0'; (*Offset)++) {
++    for (MatchLang = Languages, (*Offset) = 0; *MatchLang != '\0'; (*Offset)++) {
+       //
+       // Seek to the end of current match language. 
+       //
+diff --git a/QuarkPlatformPkg/Platform/Pei/PlatformInit/MrcWrapper.c b/QuarkPlatformPkg/Platform/Pei/PlatformInit/MrcWrapper.c
+index 73b4827..32cdd0d 100755
+--- a/QuarkPlatformPkg/Platform/Pei/PlatformInit/MrcWrapper.c
++++ b/QuarkPlatformPkg/Platform/Pei/PlatformInit/MrcWrapper.c
+@@ -1198,7 +1198,7 @@ InstallS3Memory (
+   // memory above 1MB. So Memory Callback can set cache for the system memory
+   // correctly on S3 boot path, just like it does on Normal boot path.
+   //
+-  ASSERT_EFI_ERROR ((S3MemoryRangeData->SystemMemoryLength - 0x100000) > 0);
++  ASSERT (S3MemoryRangeData->SystemMemoryLength > 0x100000);
+   BuildResourceDescriptorHob (
+             EFI_RESOURCE_SYSTEM_MEMORY,
+             (
+diff --git a/QuarkPlatformPkg/Platform/SpiFvbServices/FwBlockService.c b/QuarkPlatformPkg/Platform/SpiFvbServices/FwBlockService.c
+index e01d8b3..9be1b57 100755
+--- a/QuarkPlatformPkg/Platform/SpiFvbServices/FwBlockService.c
++++ b/QuarkPlatformPkg/Platform/SpiFvbServices/FwBlockService.c
+@@ -42,11 +42,6 @@ Revision History
+ #include "FwBlockService.h"
+ 
+ ESAL_FWB_GLOBAL         *mFvbModuleGlobal;
+-EFI_GUID gEfiFvbExtensionProtocolGuid;
+-EFI_GUID gEfiAlternateFvBlockGuid;
+-EFI_GUID gEfiFirmwareVolumeBlockProtocolGuid;
+-EFI_GUID gEfiSmmFirmwareVolumeBlockProtocolGuid;
+-
+ 
+ EFI_FW_VOL_BLOCK_DEVICE mFvbDeviceTemplate = {
+   FVB_DEVICE_SIGNATURE,
+diff --git a/QuarkPlatformPkg/QuarkPlatformPkg.dsc b/QuarkPlatformPkg/QuarkPlatformPkg.dsc
+index 24f826a..1732a9d 100755
+--- a/QuarkPlatformPkg/QuarkPlatformPkg.dsc
++++ b/QuarkPlatformPkg/QuarkPlatformPkg.dsc
+@@ -339,7 +339,9 @@
+   gEfiMdePkgTokenSpaceGuid.PcdUartDefaultDataBits|8
+   gEfiMdePkgTokenSpaceGuid.PcdUartDefaultParity|1
+   gEfiMdePkgTokenSpaceGuid.PcdUartDefaultStopBits|1
+-  gEfiMdePkgTokenSpaceGuid.PcdDefaultTerminalType|0
++  # VT-UTF8 is understood by modern terminal emulators and preserves the
++  # Unicode box-drawing characters used by the setup browser.
++  gEfiMdePkgTokenSpaceGuid.PcdDefaultTerminalType|3
+ !if $(PERFORMANCE_ENABLE) == TRUE
+   gEfiMdePkgTokenSpaceGuid.PcdPerformanceLibraryPropertyMask|0x1
+ !endif
+@@ -383,7 +385,9 @@
+ !endif
+ 
+ [PcdsDynamicExHii.common.DEFAULT]
+-  gEfiIntelFrameworkModulePkgTokenSpaceGuid.PcdPlatformBootTimeOut|L"Timeout"|gEfiGlobalVariableGuid|0x0|5
++  # Boot the embedded GRUB payload immediately.  GRUB retains an interactive
++  # recovery menu if removable media cannot be found.
++  gEfiIntelFrameworkModulePkgTokenSpaceGuid.PcdPlatformBootTimeOut|L"Timeout"|gEfiGlobalVariableGuid|0x0|0
+   gEfiIntelFrameworkModulePkgTokenSpaceGuid.PcdBootState|L"BootState"|gQuarkPlatformTokenSpaceGuid|0x0|TRUE
+ 
+ [PcdsDynamicExDefault.common.DEFAULT]
+diff --git a/QuarkPlatformPkg/Tools/QuarkSpiFixup/QuarkSpiFixup.py b/QuarkPlatformPkg/Tools/QuarkSpiFixup/QuarkSpiFixup.py
+index 8225f6a..895915b 100755
+--- a/QuarkPlatformPkg/Tools/QuarkSpiFixup/QuarkSpiFixup.py
++++ b/QuarkPlatformPkg/Tools/QuarkSpiFixup/QuarkSpiFixup.py
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env python
++#!/usr/bin/env python3
+ ## @file
+ #
+ #  Copyright (c) 2013-2015 Intel Corporation.
+@@ -96,64 +96,15 @@ if re.match(buildOptionDebug, buildType) or re.match(buildOptionRelease, buildTy
+ 						
+ 					# open current file, then update the offset and index
+ 					currentBin = open(infile, 'rb+')
+-					currentBinLength = len(currentBin.read())
+-						
+-					#
+-					# Search for Spi Entry Offset:
+-					#
+-					currentBin.seek(0, os.SEEK_SET)
+-					currCount = 0
+-					for currCount in range(currentBinLength):
+-						currByte = currentBin.read(1)
+-						currCount = currCount+1
+-						if currByte == 'S':
+-							currByte = currentBin.read(1)
+-							currCount = currCount+1
+-							if currByte == 'P':
+-								currByte = currentBin.read(1)
+-								currCount = currCount+1
+-								if currByte == 'I':
+-									currByte = currentBin.read(1)
+-									currCount = currCount+1
+-									if currByte == ' ':
+-										currByte = currentBin.read(1)
+-										currCount = currCount+1
+-										if currByte == 'E':
+-											currByte = currentBin.read(1)
+-											currCount = currCount+1
+-											if currByte == 'n':
+-												currByte = currentBin.read(1)
+-												currCount = currCount+1
+-												if currByte == 't':
+-													currByte = currentBin.read(1)
+-													currCount = currCount+1
+-													if currByte == 'r':
+-														currByte = currentBin.read(1)
+-														currCount = currCount+1
+-														if currByte == 'y':
+-															currByte = currentBin.read(1)
+-															currCount = currCount+1
+-															if currByte == ' ':
+-																currByte = currentBin.read(1)
+-																currCount = currCount+1
+-																if currByte == 'P':
+-																	currByte = currentBin.read(1)
+-																	currCount = currCount+1
+-																	if currByte == 'o':
+-																		currByte = currentBin.read(1)
+-																		currCount = currCount+1
+-																		if currByte == 'i':
+-																			currByte = currentBin.read(1)
+-																			currCount = currCount+1
+-																			if currByte == 'n':
+-																				currByte = currentBin.read(1)
+-																				currCount = currCount+1
+-																				if currByte == 't':
+-																					currByte = currentBin.read(1)
+-																					currCount = currCount+1
+-																					if currByte == ' ':
+-																						break 
+-					mySpiLocation = currentBin.tell()
++					currentData = currentBin.read()
++
++					# The reset-vector assembly leaves this marker immediately before
++					# the SPI entry point.  Search it as bytes for Python 3 support.
++					marker = b'SPI Entry Point '
++					markerOffset = currentData.find(marker)
++					if markerOffset < 0:
++						raise RuntimeError('SPI entry-point marker not found in ' + infile)
++					mySpiLocation = markerOffset + len(marker)
+ 					currentBin.seek(0, os.SEEK_SET)
+ 					SpiOffSet = mySpiLocation
+ 						
+@@ -165,7 +116,7 @@ if re.match(buildOptionDebug, buildType) or re.match(buildOptionRelease, buildTy
+ 						currentBin.write(struct.pack('I', stage1_index))
+ 							
+ 						# Print out Software Module fixup information
+-						print '%(File_Name)s (Entry point:%(Entry_Offset)s Index:%(Module_Index)02d) \n' %{"File_Name": infile, "Entry_Offset": hex(mySpiLocation), "Module_Index": stage1_index}
++						print('%(File_Name)s (Entry point:%(Entry_Offset)s Index:%(Module_Index)02d) \n' %{"File_Name": infile, "Entry_Offset": hex(mySpiLocation), "Module_Index": stage1_index})
+ 							
+ 						stage1_index += 1
+ 							
+@@ -173,7 +124,7 @@ if re.match(buildOptionDebug, buildType) or re.match(buildOptionRelease, buildTy
+ 						currentBin.write(struct.pack('I', recovery_index))
+ 							
+ 						# Print out Software Module fixup information
+-						print '%(File_Name)s (Entry point:%(Entry_Offset)s Index:%(Module_Index)02d) \n' %{"File_Name": infile, "Entry_Offset": hex(mySpiLocation), "Module_Index": recovery_index}
++						print('%(File_Name)s (Entry point:%(Entry_Offset)s Index:%(Module_Index)02d) \n' %{"File_Name": infile, "Entry_Offset": hex(mySpiLocation), "Module_Index": recovery_index})
+ 							
+ 						recovery_index += 1
+ 														
+@@ -184,7 +135,7 @@ if re.match(buildOptionDebug, buildType) or re.match(buildOptionRelease, buildTy
+ 					currentBin.seek(48, os.SEEK_SET)
+ 					low_byte = ord(currentBin.read(1))
+ 					high_byte = ord(currentBin.read(1))
+-					headerLength = ((high_byte << 8) | low_byte) / 2
++					headerLength = ((high_byte << 8) | low_byte) // 2
+ 						
+ 					currentBin.seek(0, os.SEEK_SET)
+ 					headerChecksum = 0
+@@ -267,11 +218,10 @@ if re.match(buildOptionDebug, buildType) or re.match(buildOptionRelease, buildTy
+ 
+ 				currentBin.close()					
+ 	else:
+-		print '\t ERROR: Build directory does not exist for platform: \t', platformName, '\n'
++		print('\t ERROR: Build directory does not exist for platform: \t', platformName, '\n')
+ else:
+-	print '\t ERROR: Incorrect build type specified: \t', buildType, '\n'
+-	print '\t Options are: \n'
+-	print '\t 1:\t', buildOptionDebug, ' or ', buildOptionDebug.lower(), '\n'
+-	print '\t 2:\t', buildOptionRelease, ' or ', buildOptionRelease.lower(),'\n'
+-	print '\t Please specify correct build option\t\n'
+-
++	print('\t ERROR: Incorrect build type specified: \t', buildType, '\n')
++	print('\t Options are: \n')
++	print('\t 1:\t', buildOptionDebug, ' or ', buildOptionDebug.lower(), '\n')
++	print('\t 2:\t', buildOptionRelease, ' or ', buildOptionRelease.lower(),'\n')
++	print('\t Please specify correct build option\t\n')
+diff --git a/QuarkSocPkg/QuarkNorthCluster/Library/IntelQNCLib/PciExpress.c b/QuarkSocPkg/QuarkNorthCluster/Library/IntelQNCLib/PciExpress.c
+index 9d7ae79..1412227 100755
+--- a/QuarkSocPkg/QuarkNorthCluster/Library/IntelQNCLib/PciExpress.c
++++ b/QuarkSocPkg/QuarkNorthCluster/Library/IntelQNCLib/PciExpress.c
+@@ -366,8 +366,8 @@ PcieSetClkreq (
+     //
+     // Check if CLKREQ# is supported by the endpoints
+     //
+-    if ((QNCMmPci32 (0, Bus, Device, Function, (CapOffset + PCIE_LINK_CAP_OFFSET)) 
+-      && B_QNC_PCIE_LCAP_CPM) != B_QNC_PCIE_LCAP_CPM) {
++    if ((QNCMmPci32 (0, Bus, Device, Function, (CapOffset + PCIE_LINK_CAP_OFFSET))
++      & B_QNC_PCIE_LCAP_CPM) != B_QNC_PCIE_LCAP_CPM) {
+       //
+       // CLKREQ# is not supported so dont do anything
+       //
+diff --git a/QuarkSocPkg/QuarkNorthCluster/MemoryInit/Pei/meminit.c b/QuarkSocPkg/QuarkNorthCluster/MemoryInit/Pei/meminit.c
+index a703e9a..67944dc 100755
+--- a/QuarkSocPkg/QuarkNorthCluster/MemoryInit/Pei/meminit.c
++++ b/QuarkSocPkg/QuarkNorthCluster/MemoryInit/Pei/meminit.c
+@@ -58,6 +58,7 @@
+ #include "meminit_utils.h"
+ #include "hte.h"
+ #include "io.h"
++#include <Library/BaseMemoryLib.h>
+ 
+ // Override ODT to off state if requested
+ #define DRMC_DEFAULT    (mrc_params->rd_odt_value==0?BIT12:0)
+@@ -1127,7 +1128,7 @@ static void rcvn_cal(
+ 
+ #ifdef R2R_SHARING
+   // need to set "final_delay[][]" elements to "0"
+-  memset((void *) (final_delay), 0x00, (size_t) sizeof(final_delay));
++  SetMem ((VOID *) final_delay, sizeof (final_delay), 0);
+ #endif // R2R_SHARING
+ 
+   // loop through each enabled channel
+@@ -1412,7 +1413,7 @@ static void wr_level(
+ 
+ #ifdef R2R_SHARING
+   // need to set "final_delay[][]" elements to "0"
+-  memset((void *) (final_delay), 0x00, (size_t) sizeof(final_delay));
++  SetMem ((VOID *) final_delay, sizeof (final_delay), 0);
+ #endif // R2R_SHARING
+   // loop through each enabled channel
+   for (channel_i = 0; channel_i < NUM_CHANNELS; channel_i++)
+@@ -1666,7 +1667,7 @@ static void rd_train(
+ 
+ #ifdef R2R_SHARING
+   // need to set "final_delay[][]" elements to "0"
+-  memset((void *) (final_delay), 0x00, (size_t) sizeof(final_delay));
++  SetMem ((VOID *) final_delay, sizeof (final_delay), 0);
+ #endif // R2R_SHARING
+ 
+   // look for passing coordinates
+@@ -1988,7 +1989,7 @@ static void wr_train(
+ 
+ #ifdef R2R_SHARING
+   // need to set "final_delay[][]" elements to "0"
+-  memset((void *) (final_delay), 0x00, (size_t) sizeof(final_delay));
++  SetMem ((VOID *) final_delay, sizeof (final_delay), 0);
+ #endif // R2R_SHARING
+ 
+   // start algorithm on the LEFT side and train each channel/bl until no failures are observed, then repeat for the RIGHT side.
+diff --git a/QuarkSocPkg/QuarkNorthCluster/Spi/Common/SpiCommon.c b/QuarkSocPkg/QuarkNorthCluster/Spi/Common/SpiCommon.c
+index 5b6ad01..37a8a6e 100755
+--- a/QuarkSocPkg/QuarkNorthCluster/Spi/Common/SpiCommon.c
++++ b/QuarkSocPkg/QuarkNorthCluster/Spi/Common/SpiCommon.c
+@@ -649,10 +649,17 @@ Returns:
+ --*/
+ {
+   SPI_INSTANCE  *SpiInstance;
+-  UINTN         PchRootComplexBar;
+ 
+   SpiInstance       = SPI_INSTANCE_FROM_SPIPROTOCOL (This);
+-  PchRootComplexBar = SpiInstance->PchRootComplexBar;
++
++  //
++  // Galileo uses non-descriptor mode.  The BIOS region occupies the range
++  // described by BiosStartOffset/BiosSize in the platform SPI init table.
++  // The original Quark code left both output values uninitialized even
++  // though SendSpiCmd() uses BaseAddress for memory-mapped BIOS reads.
++  //
++  *BaseAddress  = SpiInstance->SpiInitTable.BiosStartOffset;
++  *LimitAddress = *BaseAddress + SpiInstance->SpiInitTable.BiosSize - 1;
+ 
+   if (SpiRegionType == EnumSpiRegionAll) {
+     //

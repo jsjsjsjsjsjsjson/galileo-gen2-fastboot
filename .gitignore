@@ -1,0 +1,28 @@
+# Downloaded upstream trees and all compiler output.
+/work/
+/logs/
+/firmware/
+
+# Generated release files and raw SPI images.
+/artifacts/
+/galileo-spi-newgrub
+
+# SPI image-generator output.
+/flash/Flash*.bin
+/flash/Flash.cap
+/flash/CapsuleComponents.ini
+/flash/image.ffs
+/flash/image_info.txt
+/flash/layout.mk
+/flash/mfh.bin
+/flash/install/
+/flash/withPDAT/
+/flash/asset-signing-tool/sign
+/flash/asset-signing-tool/*.o
+/flash/BaseTools/*/C/bin/
+
+# Language/tool caches.
+__pycache__/
+*.py[cod]
+*.d
+*.o

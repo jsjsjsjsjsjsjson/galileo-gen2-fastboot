@@ -1,0 +1,18 @@
+# Copy this file to /boot/grub/grub.cfg on the USB or microSD filesystem.
+# Keep timeout=0 for the fast path.  Hold Shift while GRUB starts if a menu is
+# needed; UEFI setup is also available from a running Linux system with
+# `systemctl reboot --firmware-setup` when supported.
+
+set default=0
+set timeout=0
+set timeout_style=hidden
+
+menuentry 'Galileo Gen 2 Linux' {
+  # Adjust root= and filenames to match the removable medium.
+  linux /boot/vmlinuz root=LABEL=GALILEO_ROOT rootwait ro console=ttyS1,115200n8 reboot=efi,warm
+  initrd /boot/initramfs.img
+}
+
+menuentry 'UEFI setup' {
+  fwsetup
+}
